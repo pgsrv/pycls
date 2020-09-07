@@ -70,47 +70,11 @@ def compute_precise_bn_stats(model, loader):
         bn.momentum = momentums[i]
 
 
-def reset_bn_stats(model):
-    """Resets running BN stats."""
-    for m in model.modules():
-        if isinstance(m, torch.nn.BatchNorm2d):
-            m.reset_running_stats()
-
-
-def complexity_conv2d(cx, w_in, w_out, k, stride, padding, groups=1, bias=False):
-    """Accumulates complexity of Conv2D into cx = (h, w, flops, params, acts)."""
-    h, w, flops, params, acts = cx["h"], cx["w"], cx["flops"], cx["params"], cx["acts"]
-    h = (h + 2 * padding - k) // stride + 1
-    w = (w + 2 * padding - k) // stride + 1
-    flops += k * k * w_in * w_out * h * w // groups
-    params += k * k * w_in * w_out // groups
-    flops += w_out if bias else 0
-    params += w_out if bias else 0
-    acts += w_out * h * w
-    return {"h": h, "w": w, "flops": flops, "params": params, "acts": acts}
-
-
-def complexity_batchnorm2d(cx, w_in):
-    """Accumulates complexity of BatchNorm2D into cx = (h, w, flops, params, acts)."""
-    h, w, flops, params, acts = cx["h"], cx["w"], cx["flops"], cx["params"], cx["acts"]
-    params += 2 * w_in
-    return {"h": h, "w": w, "flops": flops, "params": params, "acts": acts}
-
-
-def complexity_maxpool2d(cx, w_in, k, stride, padding):
-    """Accumulates complexity of MaxPool2d into cx = (h, w, flops, params, acts)."""
-    h, w, flops, params, acts = cx["h"], cx["w"], cx["flops"], cx["params"], cx["acts"]
-    h = (h + 2 * padding - k) // stride + 1
-    w = (w + 2 * padding - k) // stride + 1
-    acts += w_in * h * w
-    return {"h": h, "w": w, "flops": flops, "params": params, "acts": acts}
-
-
 def complexity(model):
     """Compute model complexity (model can be model instance or model class)."""
     size = cfg.TRAIN.IM_SIZE
     cx = {"h": size, "w": size, "flops": 0, "params": 0, "acts": 0}
-    cx = model.complexity(cx)
+    cx = unwrap_model(model).complexity(cx)
     return {"flops": cx["flops"], "params": cx["params"], "acts": cx["acts"]}
 
 
@@ -122,18 +86,3 @@ def drop_connect(x, drop_ratio):
     x.div_(keep_ratio)
     x.mul_(mask)
     return x
-
-
-def get_flat_weights(model):
-    """Gets all model weights as a single flat vector."""
-    return torch.cat([p.data.view(-1, 1) for p in model.parameters()], 0)
-
-
-def set_flat_weights(model, flat_weights):
-    """Sets all model weights from a single flat vector."""
-    k = 0
-    for p in model.parameters():
-        n = p.data.numel()
-        p.data.copy_(flat_weights[k : (k + n)].view_as(p.data))
-        k += n
-    assert k == flat_weights.numel()
